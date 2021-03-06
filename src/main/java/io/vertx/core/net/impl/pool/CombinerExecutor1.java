@@ -3,18 +3,18 @@ package io.vertx.core.net.impl.pool;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class NonBlockingSynchronization1<S> implements Synchronization<S> {
+public class CombinerExecutor1<S> implements Executor<S> {
 
   private final ConcurrentLinkedDeque<Action<S>> q = new ConcurrentLinkedDeque<>();
   private final AtomicInteger s = new AtomicInteger();
   private final S state;
 
-  public NonBlockingSynchronization1(S state) {
+  public CombinerExecutor1(S state) {
     this.state = state;
   }
 
   @Override
-  public void execute(Action<S> action) {
+  public void submit(Action<S> action) {
     q.add(action);
     if (s.get() > 0) {
       return;

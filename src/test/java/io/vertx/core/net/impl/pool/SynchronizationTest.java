@@ -38,8 +38,8 @@ public class SynchronizationTest extends AsyncTestBase {
 
     int numThreads = 8;
     int numIter = 1_000 * 100;
-    Synchronization<Object> sync = new NonBlockingSynchronization2<>(new Object());
-    Synchronization.Action action = s -> {
+    Executor<Object> sync = new CombinerExecutor2<>(new Object());
+    Executor.Action action = s -> {
       burnCPU(10);
       return null;
     };
@@ -50,7 +50,7 @@ public class SynchronizationTest extends AsyncTestBase {
           if (j % 1_000 == 0) {
             System.out.println("Thread " + Thread.currentThread() + " " + j / 1_000);
           }
-          sync.execute(action);
+          sync.submit(action);
         }
       });
     }

@@ -3,21 +3,23 @@ package io.vertx.core.net.impl.pool;
 import io.netty.util.internal.PlatformDependent;
 
 import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class NonBlockingSynchronization2<S> implements Synchronization<S> {
+/**
+ * Lock free executor that serialized
+ */
+public class CombinerExecutor2<S> implements Executor<S> {
 
   private final Queue<Action<S>> q = PlatformDependent.newMpscQueue();
   private final AtomicInteger s = new AtomicInteger();
   private final S state;
 
-  public NonBlockingSynchronization2(S state) {
+  public CombinerExecutor2(S state) {
     this.state = state;
   }
 
   @Override
-  public void execute(Action<S> action) {
+  public void submit(Action<S> action) {
     q.add(action);
     if (s.get() != 0 || !s.compareAndSet(0, 1)) {
       return;

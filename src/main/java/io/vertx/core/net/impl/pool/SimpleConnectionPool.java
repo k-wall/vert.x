@@ -76,7 +76,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
   private final int maxWeight;
   private int weight;
   private boolean closed;
-  private final Synchronization<SimpleConnectionPool<C>> sync;
+  private final Executor<SimpleConnectionPool<C>> sync;
 
   SimpleConnectionPool(Connector<C> connector, int maxSize, int maxWeight) {
     this(connector, maxSize, maxWeight, -1);
@@ -89,11 +89,11 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     this.maxWaiters = maxWaiters;
     this.weight = 0;
     this.maxWeight = maxWeight;
-    this.sync = new NonBlockingSynchronization2<>(this);
+    this.sync = new CombinerExecutor2<>(this);
   }
 
-  private void execute(Synchronization.Action<SimpleConnectionPool<C>> action) {
-    sync.execute(action);
+  private void execute(Executor.Action<SimpleConnectionPool<C>> action) {
+    sync.submit(action);
   }
 
   public int size() {
@@ -110,7 +110,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     });
   }
 
-  private static class ConnectSuccess<C> implements Synchronization.Action<SimpleConnectionPool<C>> {
+  private static class ConnectSuccess<C> implements Executor.Action<SimpleConnectionPool<C>> {
 
     private final Slot<C> slot;
     private final ConnectResult<C> result;
@@ -186,7 +186,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     }
   }
 
-  private static class Remove<C> implements Synchronization.Action<SimpleConnectionPool<C>> {
+  private static class Remove<C> implements Executor.Action<SimpleConnectionPool<C>> {
 
     protected final Slot<C> removed;
 
@@ -229,7 +229,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     execute(new Remove<>(removed));
   }
 
-  private static class Evict<C> implements Synchronization.Action<SimpleConnectionPool<C>> {
+  private static class Evict<C> implements Executor.Action<SimpleConnectionPool<C>> {
 
     private final Predicate<C> predicate;
     private final Handler<AsyncResult<List<C>>> handler;
@@ -269,7 +269,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     execute(new Evict<>(predicate, handler));
   }
 
-  private static class Acquire<C> implements Synchronization.Action<SimpleConnectionPool<C>> {
+  private static class Acquire<C> implements Executor.Action<SimpleConnectionPool<C>> {
 
     private final EventLoopContext context;
     private final int weight;
@@ -358,7 +358,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     }
   }
 
-  private static class Recycle<C> implements Synchronization.Action<SimpleConnectionPool<C>> {
+  private static class Recycle<C> implements Executor.Action<SimpleConnectionPool<C>> {
 
     private final Slot<C> slot;
 
@@ -398,7 +398,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     return weight;
   }
 
-  private static class Close<C> implements Synchronization.Action<SimpleConnectionPool<C>> {
+  private static class Close<C> implements Executor.Action<SimpleConnectionPool<C>> {
 
     private final Handler<AsyncResult<List<Future<C>>>> handler;
 
