@@ -105,7 +105,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
       if (ar.succeeded()) {
         execute(new ConnectSuccess<>(slot, ar.result(), handler));
       } else {
-        execute(new ConnectFailed(slot, ar.cause(), handler));
+        execute(new ConnectFailed<>(slot, ar.cause(), handler));
       }
     });
   }
