@@ -476,7 +476,12 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
 
   @Override
   public EventLoopContext createEventLoopContext() {
-    return createEventLoopContext(null, closeFuture, null, Thread.currentThread().getContextClassLoader());
+    return createEventLoopContext(eventLoopGroup.next());
+  }
+
+  @Override
+  public EventLoopContext createEventLoopContext(EventLoop eventLoop) {
+    return new EventLoopContext(this, tracer, eventLoop, internalWorkerPool, workerPool, null, closeFuture, Thread.currentThread().getContextClassLoader());
   }
 
   @Override

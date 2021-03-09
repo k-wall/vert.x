@@ -10,6 +10,8 @@
  */
 package io.vertx.core.net.impl.pool;
 
+import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.FutureListener;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
 import io.vertx.core.impl.EventLoopContext;
@@ -29,7 +31,7 @@ public interface Connector<C> {
    * @param listener the listener
    * @param handler the callback handler with the result
    */
-  void connect(EventLoopContext context, ConnectionEventListener listener, Handler<AsyncResult<ConnectResult<C>>> handler);
+  void connect(EventLoop context, ConnectionEventListener listener, FutureListener<ConnectResult<C>> handler);
 
   /**
    * Checks whether the connection is still valid.

@@ -10,21 +10,15 @@
  */
 package io.vertx.core.net.impl.pool;
 
+import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.FutureListener;
+import io.netty.util.concurrent.Promise;
 import io.vertx.core.AsyncResult;
-import io.vertx.core.Future;
 import io.vertx.core.Handler;
-import io.vertx.core.Promise;
-import io.vertx.core.http.ConnectionPoolTooBusyException;
-import io.vertx.core.impl.EventLoopContext;
-import io.vertx.core.net.impl.clientconnection.ConnectResult;
 import io.vertx.core.net.impl.clientconnection.Lease;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 
 /**
@@ -47,7 +41,7 @@ public interface ConnectionPool<C> {
    * @param weight the weight
    * @param handler the callback handler with the result
    */
-  void acquire(EventLoopContext context, int weight, Handler<AsyncResult<Lease<C>>> handler);
+  void acquire(EventLoop context, int weight, FutureListener<Lease<C>> handler);
 
   /**
    * <p> Evict connections from the pool with a predicate, only unused connection are evicted.
@@ -57,7 +51,7 @@ public interface ConnectionPool<C> {
    * @param predicate to determine whether a connection should be evicted
    * @param handler the callback handler with the result
    */
-  void evict(Predicate<C> predicate, Handler<AsyncResult<List<C>>> handler);
+  void evict(Predicate<C> predicate, Promise<List<C>> handler);
 
   /**
    * Close the pool.
@@ -66,7 +60,7 @@ public interface ConnectionPool<C> {
    *
    * @param handler the callback handler with the result
    */
-  void close(Handler<AsyncResult<List<Future<C>>>> handler);
+  void close(Promise<List<Future<C>>> handler);
 
   /**
    * @return the number of managed connections
