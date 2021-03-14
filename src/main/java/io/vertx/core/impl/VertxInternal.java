@@ -110,8 +110,6 @@ public interface VertxInternal extends Vertx {
 
   EventLoopContext createEventLoopContext(EventLoop eventLoop, WorkerPool workerPool, ClassLoader tccl);
 
-  EventLoopContext createEventLoopContext(EventLoop eventLoop);
-
   EventLoopContext createEventLoopContext();
 
   /**

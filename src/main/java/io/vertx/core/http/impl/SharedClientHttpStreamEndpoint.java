@@ -10,10 +10,8 @@
  */
 package io.vertx.core.http.impl;
 
-import io.netty.channel.EventLoop;
-import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.Promise;
 import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.http.HttpConnection;
 import io.vertx.core.http.HttpVersion;
@@ -58,10 +56,9 @@ class SharedClientHttpStreamEndpoint extends ClientHttpEndpointBase<Lease<HttpCl
   }
 
   @Override
-  public void connect(EventLoop eventLoop, ConnectionEventListener listener, FutureListener<ConnectResult<HttpClientConnection>> handler) {
-    EventLoopContext ctx = client.getVertx().createEventLoopContext(eventLoop);
+  public void connect(EventLoopContext context, ConnectionEventListener listener, Handler<AsyncResult<ConnectResult<HttpClientConnection>>> handler) {
     connector
-      .httpConnect(ctx)
+      .httpConnect(context)
       .onComplete(ar -> {
         if (ar.succeeded()) {
           incRefCount();
@@ -76,7 +73,7 @@ class SharedClientHttpStreamEndpoint extends ClientHttpEndpointBase<Lease<HttpCl
           long capacity = connection.concurrency();
           Handler<HttpConnection> connectionHandler = client.connectionHandler();
           if (connectionHandler != null) {
-            ctx.emit(connection, connectionHandler);
+            context.emit(connection, connectionHandler);
           }
           int weight;
           if (connection instanceof Http1xClientConnection) {
@@ -84,9 +81,9 @@ class SharedClientHttpStreamEndpoint extends ClientHttpEndpointBase<Lease<HttpCl
           } else {
             weight = http1MaxSize;
           }
-          eventLoop.newSucceededFuture(new ConnectResult<>(connection, capacity, weight)).addListener(handler);
+          handler.handle(Future.succeededFuture(new ConnectResult<>(connection, capacity, weight)));
         } else {
-          eventLoop.<ConnectResult<HttpClientConnection>>newFailedFuture(ar.cause()).addListener(handler);
+          handler.handle(Future.failedFuture(ar.cause()));
         }
       });
   }
@@ -97,22 +94,17 @@ class SharedClientHttpStreamEndpoint extends ClientHttpEndpointBase<Lease<HttpCl
   }
 
   void checkExpired() {
-
-    Promise<List<HttpClientConnection>> p = client.getVertx().getOrCreateContext().nettyEventLoop().newPromise();
-
-    p.addListener((FutureListener<List<HttpClientConnection>>) fut -> {
-      if (fut.isSuccess()) {
-        List<HttpClientConnection> lst = fut.getNow();
+    pool.evict(conn -> !conn.isValid(), ar -> {
+      if (ar.succeeded()) {
+        List<HttpClientConnection> lst = ar.result();
         lst.forEach(HttpConnection::close);
       }
     });
-
-    pool.evict(conn -> !conn.isValid(), p);
   }
 
   @Override
   public void requestConnection2(ContextInternal ctx, Handler<AsyncResult<Lease<HttpClientConnection>>> handler) {
     int weight = client.getOptions().getProtocolVersion() == HttpVersion.HTTP_2 ? http1MaxSize : http2MaxSize;
-    pool.acquire(ctx.nettyEventLoop(), weight, ctx.promise(handler));
+    pool.acquire((EventLoopContext) ctx, weight, handler);
   }
 }

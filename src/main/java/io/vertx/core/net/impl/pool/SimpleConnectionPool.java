@@ -10,12 +10,12 @@
  */
 package io.vertx.core.net.impl.pool;
 
-import io.netty.channel.EventLoop;
-import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.Promise;
-import io.netty.util.concurrent.Future;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
+import io.vertx.core.Handler;
+import io.vertx.core.Promise;
 import io.vertx.core.http.ConnectionPoolTooBusyException;
-import io.vertx.core.impl.NoStackTraceThrowable;
+import io.vertx.core.impl.EventLoopContext;
 import io.vertx.core.net.impl.clientconnection.ConnectResult;
 import io.vertx.core.net.impl.clientconnection.Lease;
 
@@ -30,7 +30,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
   static class Slot<C> implements ConnectionEventListener {
 
     private final SimpleConnectionPool<C> pool;
-    private final EventLoop eventLoop;
+    private final EventLoopContext context;
     private final Promise<C> result;
     private C connection;
     private int index;
@@ -38,14 +38,14 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     private int maxCapacity;
     private int weight;
 
-    public Slot(SimpleConnectionPool<C> pool, EventLoop eventLoop, int index, int initialWeight) {
+    public Slot(SimpleConnectionPool<C> pool, EventLoopContext context, int index, int initialWeight) {
       this.pool = pool;
-      this.eventLoop = eventLoop;
+      this.context = context;
       this.connection = null;
       this.capacity = 0;
       this.index = index;
       this.weight = initialWeight;
-      this.result = eventLoop.newPromise();
+      this.result = context.promise();
     }
 
     @Override
@@ -56,12 +56,12 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
 
   static class Waiter<C> {
 
-    final EventLoop eventLoop;
+    final EventLoopContext context;
     final int weight;
-    final FutureListener<Lease<C>> handler;
+    final Handler<AsyncResult<Lease<C>>> handler;
 
-    Waiter(EventLoop eventLoop, final int weight, FutureListener<Lease<C>> handler) {
-      this.eventLoop = eventLoop;
+    Waiter(EventLoopContext context, final int weight, Handler<AsyncResult<Lease<C>>> handler) {
+      this.context = context;
       this.weight = weight;
       this.handler = handler;
     }
@@ -100,12 +100,12 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
       return size;
   }
 
-  public void connect(Slot<C> slot, FutureListener<Lease<C>> handler) {
-    connector.connect(slot.eventLoop, slot, res -> {
-      if (res.isSuccess()) {
-        execute(new ConnectSuccess<>(slot, res.getNow(), handler));
+  public void connect(Slot<C> slot, Handler<AsyncResult<Lease<C>>> handler) {
+    connector.connect(slot.context, slot, ar -> {
+      if (ar.succeeded()) {
+        execute(new ConnectSuccess<>(slot, ar.result(), handler));
       } else {
-        execute(new ConnectFailed<>(slot, res.cause(), handler));
+        execute(new ConnectFailed<>(slot, ar.cause(), handler));
       }
     });
   }
@@ -114,9 +114,9 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
 
     private final Slot<C> slot;
     private final ConnectResult<C> result;
-    private final FutureListener<Lease<C>> handler;
+    private final Handler<AsyncResult<Lease<C>>> handler;
 
-    private ConnectSuccess(Slot<C> slot, ConnectResult<C> result, FutureListener<Lease<C>> handler) {
+    private ConnectSuccess(Slot<C> slot, ConnectResult<C> result, Handler<AsyncResult<Lease<C>>> handler) {
       this.slot = slot;
       this.result = result;
       this.handler = handler;
@@ -132,8 +132,8 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
       pool.weight += (result.weight() - initialWeight);
       if (pool.closed) {
         return () -> {
-          slot.eventLoop.<Lease<C>>newFailedFuture(new NoStackTraceThrowable("Closed")).addListener(handler);
-          slot.result.setSuccess(slot.connection);
+          slot.context.emit(Future.failedFuture("Closed"), handler);
+          slot.result.complete(slot.connection);
         };
       } else {
         int c = 1;
@@ -156,7 +156,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
               lease.emit();
             }
           }
-          slot.result.setSuccess(slot.connection);
+          slot.result.complete(slot.connection);
         };
       }
     }
@@ -165,9 +165,9 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
   private static class ConnectFailed<C> extends Remove<C> {
 
     private final Throwable cause;
-    private final FutureListener<Lease<C>> handler;
+    private final Handler<AsyncResult<Lease<C>>> handler;
 
-    public ConnectFailed(Slot<C> removed, Throwable cause, FutureListener<Lease<C>> handler) {
+    public ConnectFailed(Slot<C> removed, Throwable cause, Handler<AsyncResult<Lease<C>>> handler) {
       super(removed);
       this.cause = cause;
       this.handler = handler;
@@ -180,8 +180,8 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
         if (res != null) {
           res.run();
         }
-        removed.eventLoop.<Lease<C>>newFailedFuture(cause).addListener(handler);
-        removed.result.setFailure(cause);
+        removed.context.emit(Future.failedFuture(cause), handler);
+        removed.result.fail(cause);
       };
     }
   }
@@ -203,7 +203,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
       removed.weight = 0;
       Waiter<C> waiter = pool.waiters.poll();
       if (waiter != null) {
-        Slot<C> slot = new Slot<>(pool, waiter.eventLoop, removed.index, waiter.weight);
+        Slot<C> slot = new Slot<>(pool, waiter.context, removed.index, waiter.weight);
         pool.weight -= w;
         pool.weight += waiter.weight;
         pool.slots[removed.index] = slot;
@@ -232,9 +232,9 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
   private static class Evict<C> implements Executor.Action<SimpleConnectionPool<C>> {
 
     private final Predicate<C> predicate;
-    private final Promise<List<C>> handler;
+    private final Handler<AsyncResult<List<C>>> handler;
 
-    public Evict(Predicate<C> predicate, Promise<List<C>> handler) {
+    public Evict(Predicate<C> predicate, Handler<AsyncResult<List<C>>> handler) {
       this.predicate = predicate;
       this.handler = handler;
     }
@@ -260,23 +260,23 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
           pool.size--;
         }
       }
-      return () -> handler.setSuccess(lst);
+      return () -> handler.handle(Future.succeededFuture(lst));
     }
   }
 
   @Override
-  public void evict(Predicate<C> predicate, Promise<List<C>> handler) {
+  public void evict(Predicate<C> predicate, Handler<AsyncResult<List<C>>> handler) {
     execute(new Evict<>(predicate, handler));
   }
 
   private static class Acquire<C> implements Executor.Action<SimpleConnectionPool<C>> {
 
-    private final EventLoop eventLoop;
+    private final EventLoopContext context;
     private final int weight;
-    private final FutureListener<Lease<C>> handler;
+    private final Handler<AsyncResult<Lease<C>>> handler;
 
-    public Acquire(EventLoop eventLoop, int weight, FutureListener<Lease<C>> handler) {
-      this.eventLoop = eventLoop;
+    public Acquire(EventLoopContext context, int weight, Handler<AsyncResult<Lease<C>>> handler) {
+      this.context = context;
       this.weight = weight;
       this.handler = handler;
     }
@@ -284,13 +284,13 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     @Override
     public Runnable execute(SimpleConnectionPool<C> pool) {
       if (pool.closed) {
-        return () -> eventLoop.<Lease<C>>newFailedFuture(new NoStackTraceThrowable("Closed")).addListener(handler);
+        return () -> context.emit(Future.failedFuture("Closed"), handler);
       }
 
       // 1. Try reuse a existing connection with the same context
       for (int i = 0;i < pool.size;i++) {
         Slot<C> slot = pool.slots[i];
-        if (slot != null && slot.eventLoop == eventLoop && slot.capacity > 0) {
+        if (slot != null && slot.context == context && slot.capacity > 0) {
           slot.capacity--;
           return () -> new LeaseImpl<>(slot, handler).emit();
         }
@@ -300,7 +300,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
       if (pool.weight < pool.maxWeight) {
         pool.weight += weight;
         if (pool.size < pool.slots.length) {
-          Slot<C> slot = new Slot<>(pool, eventLoop, pool.size, weight);
+          Slot<C> slot = new Slot<>(pool, context, pool.size, weight);
           pool.slots[pool.size++] = slot;
           return () -> pool.connect(slot, handler);
         } else {
@@ -318,26 +318,26 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
 
       // 4. Fall in waiters list
       if (pool.maxWaiters == -1 || pool.waiters.size() < pool.maxWaiters) {
-        pool.waiters.add(new Waiter<>(eventLoop, weight, handler));
+        pool.waiters.add(new Waiter<>(context, weight, handler));
         return null;
       } else {
-        return () -> eventLoop.<Lease<C>>newFailedFuture(new ConnectionPoolTooBusyException("Connection pool reached max wait queue size of " + pool.maxWaiters)).addListener(handler);
+        return () -> context.emit(Future.failedFuture(new ConnectionPoolTooBusyException("Connection pool reached max wait queue size of " + pool.maxWaiters)), handler);
       }
     }
   }
 
-  public void acquire(EventLoop context, int weight, FutureListener<Lease<C>> handler) {
+  public void acquire(EventLoopContext context, int weight, Handler<AsyncResult<Lease<C>>> handler) {
     execute(new Acquire<>(context, weight, handler));
   }
 
   static class LeaseImpl<C> implements Lease<C> {
 
-    private final FutureListener<Lease<C>> handler;
+    private final Handler<AsyncResult<Lease<C>>> handler;
     private final Slot<C> slot;
     private final C connection;
     private boolean recycled;
 
-    public LeaseImpl(Slot<C> slot, FutureListener<Lease<C>> handler) {
+    public LeaseImpl(Slot<C> slot, Handler<AsyncResult<Lease<C>>> handler) {
       this.handler = handler;
       this.slot = slot;
       this.connection = slot.connection;
@@ -354,7 +354,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
     }
 
     void emit() {
-      slot.eventLoop.newSucceededFuture(new LeaseImpl<>(slot, handler)).addListener(handler);
+      slot.context.emit(Future.succeededFuture(new LeaseImpl<>(slot, handler)), handler);
     }
   }
 
@@ -400,9 +400,9 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
 
   private static class Close<C> implements Executor.Action<SimpleConnectionPool<C>> {
 
-    private final Promise<List<Future<C>>> handler;
+    private final Handler<AsyncResult<List<Future<C>>>> handler;
 
-    private Close(Promise<List<Future<C>>> handler) {
+    private Close(Handler<AsyncResult<List<Future<C>>>> handler) {
       this.handler = handler;
     }
 
@@ -418,18 +418,17 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
       pool.waiters.clear();
       list = new ArrayList<>();
       for (int i = 0;i < pool.size;i++) {
-        list.add(pool.slots[i].result);
+        list.add(pool.slots[i].result.future());
       }
       return () -> {
-        b.forEach(w -> w.eventLoop.<Lease<C>>newFailedFuture(new NoStackTraceThrowable("Closed")).addListener(w.handler));
-        // TODO
-        handler.setSuccess(list);
+        b.forEach(w -> w.context.emit(Future.failedFuture("Closed"), w.handler));
+        handler.handle(Future.succeededFuture(list));
       };
     }
   }
 
   @Override
-  public void close(Promise<List<Future<C>>> handler) {
+  public void close(Handler<AsyncResult<List<Future<C>>>> handler) {
     execute(new Close<>(handler));
   }
 }

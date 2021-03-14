@@ -3544,7 +3544,7 @@ public abstract class HttpTest extends HttpTestBase {
     startServer(testAddress);
     Context ctx = vertx.getOrCreateContext();
     client.connectionHandler(conn -> {
-      assertSameEventLoop(ctx, Vertx.currentContext());
+      assertSame(ctx, Vertx.currentContext());
       complete();
     });
     ctx.runOnContext(v -> {
