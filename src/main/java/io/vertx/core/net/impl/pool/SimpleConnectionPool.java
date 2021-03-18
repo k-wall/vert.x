@@ -411,7 +411,7 @@ public class SimpleConnectionPool<C> implements ConnectionPool<C> {
       List<Future<C>> list;
       List<Waiter<C>> b;
       if (pool.closed) {
-        throw new IllegalStateException();
+        return () -> handler.handle(Future.failedFuture("Pool already closed"));
       }
       pool.closed = true;
       b = new ArrayList<>(pool.waiters);

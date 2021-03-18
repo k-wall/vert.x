@@ -15,7 +15,9 @@ import org.junit.Test;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class SynchronizationTest extends AsyncTestBase {
 
@@ -30,6 +32,61 @@ public class SynchronizationTest extends AsyncTestBase {
     final long target_delay = Utils.ONE_MICRO_IN_NANO * cpu;
     long num_iters = Math.round(target_delay * 1.0 * iterationsForOneMilli / Utils.ONE_MILLI_IN_NANO);
     Utils.blackholeCpu(num_iters);
+  }
+
+  @Test
+  public void testActionReentrancy() throws Exception {
+    AtomicBoolean isReentrant1 = new AtomicBoolean();
+    AtomicBoolean isReentrant2 = new AtomicBoolean();
+    Executor<Object> sync = new CombinerExecutor2<>(new Object());
+    CountDownLatch latch = new CountDownLatch(2);
+    sync.submit(state1 -> {
+      AtomicBoolean inCallback = new AtomicBoolean();
+      inCallback.set(true);
+      try {
+        sync.submit(state2 -> {
+          isReentrant1.set(inCallback.get());
+          latch.countDown();
+          return () -> {
+            isReentrant2.set(inCallback.get());
+            latch.countDown();
+          };
+        });
+      } finally {
+        inCallback.set(false);
+      }
+      return null;
+    });
+    awaitLatch(latch);
+    assertFalse(isReentrant1.get());
+    assertFalse(isReentrant2.get());
+  }
+
+  @Test
+  public void testPostTaskReentrancy() throws Exception {
+    AtomicBoolean isReentrant1 = new AtomicBoolean();
+    AtomicBoolean isReentrant2 = new AtomicBoolean();
+    Executor<Object> sync = new CombinerExecutor2<>(new Object());
+    CountDownLatch latch = new CountDownLatch(1);
+    sync.submit(state1 -> () -> {
+      AtomicBoolean inCallback = new AtomicBoolean();
+      inCallback.set(true);
+      try {
+        sync.submit(state2 -> {
+          isReentrant1.set(inCallback.get());
+          latch.countDown();
+          return () -> {
+            isReentrant2.set(inCallback.get());
+            latch.countDown();
+          };
+        });
+      } finally {
+        inCallback.set(false);
+      }
+    });
+    awaitLatch(latch);
+    assertFalse(isReentrant1.get());
+    assertFalse(isReentrant2.get());
   }
 
   @Test

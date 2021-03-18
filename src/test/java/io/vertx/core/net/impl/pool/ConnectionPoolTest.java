@@ -446,6 +446,23 @@ public class ConnectionPoolTest extends VertxTestBase {
     }));
   }
 
+  @Test
+  public void testCloseTwice() throws Exception {
+    AtomicBoolean isReentrant = new AtomicBoolean();
+    ConnectionManager mgr = new ConnectionManager();
+    ConnectionPool<Connection> pool = ConnectionPool.pool(mgr, 2, 2);
+    CountDownLatch latch = new CountDownLatch(1);
+    pool.close(onSuccess(lst -> {
+      AtomicBoolean inCallback = new AtomicBoolean();
+      pool.close(onFailure(err -> {
+        isReentrant.set(inCallback.get());
+        latch.countDown();
+      }));
+    }));
+    awaitLatch(latch);
+    assertFalse(isReentrant.get());
+  }
+
   static class Connection {
     final int capacity;
     public Connection() {
